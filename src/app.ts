@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import { rateLimit } from "express-rate-limit";
 import { env } from "./config/env.js";
@@ -10,8 +9,13 @@ import { enquiryRouter } from "./routes/enquiry.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
 import { errorHandler } from "./middleware/error.js";
 import { vehicleCatalogRouter } from "./routes/vehicle-catalog.routes.js";
+import { createRequire } from "node:module";
 
 export const app = express();
+const require = createRequire(import.meta.url);
+const helmet = require("helmet") as (
+  options?: Record<string, unknown>
+) => express.RequestHandler;
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
