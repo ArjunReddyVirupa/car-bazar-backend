@@ -6,15 +6,6 @@ function encodePath(path: string) {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
-export async function testStorage() {
-  const { data, error } = await supabaseAdmin.storage.listBuckets();
-
-  console.log("SUPABASE URL:", env.SUPABASE_URL);
-  console.log("BUCKET:", env.SUPABASE_STORAGE_BUCKET);
-  console.log("BUCKETS:", data);
-  console.log("ERROR:", error);
-}
-await testStorage();
 export async function uploadImage(path: string, data: Buffer) {
   const { error } = await supabaseAdmin.storage
     .from(env.SUPABASE_STORAGE_BUCKET)
