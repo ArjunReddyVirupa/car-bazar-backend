@@ -12,6 +12,9 @@ import { vehicleCatalogRouter } from "./routes/vehicle-catalog.routes.js";
 import { createRequire } from "node:module";
 
 export const app = express();
+const allowedOrigins = ["http://localhost:3000", env.FRONTEND_URL].filter(
+  Boolean
+);
 const require = createRequire(import.meta.url);
 const helmet = require("helmet") as (
   options?: Record<string, unknown>
@@ -23,7 +26,20 @@ app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(
   cors({
-    origin: env.FRONTEND_URL,
+    origin: (origin, callback) => {
+      // Allow requests with no Origin header (browser navigation, health checks, etc.)
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
