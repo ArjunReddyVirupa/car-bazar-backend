@@ -5,7 +5,11 @@ import { z } from "zod";
 import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/http.js";
-import { deleteImage, uploadImage } from "../services/storage.service.js";
+import {
+  createSignedImageUpload,
+  deleteImage,
+  uploadImage,
+} from "../services/storage.service.js";
 
 const fuelValues = [
   "PETROL",
@@ -510,4 +514,206 @@ export async function deleteCarImage(req: Request, res: Response) {
   await prisma.carImage.delete({ where: { id: image.id } });
   await deleteImage(image.storagePath);
   res.status(204).send();
+}
+
+export async function completeCarImageUploads(req: Request, res: Response) {
+  const id = idSchema.parse(req.params.id);
+
+  const car = await prisma.car.findUnique({
+    where: { id },
+    include: { images: true },
+  });
+
+  if (!car) {
+    throw new AppError(404, "Car not found.", "CAR_NOT_FOUND");
+  }
+
+  const body = req.body as {
+    images?: {
+      path?: string;
+      publicUrl?: string;
+      originalName?: string;
+      mimeType?: string;
+      sizeBytes?: number;
+      displayOrder?: number;
+    }[];
+  };
+
+  const images = Array.isArray(body.images) ? body.images : [];
+
+  if (images.length === 0) {
+    throw new AppError(
+      400,
+      "At least one uploaded image is required.",
+      "NO_IMAGES"
+    );
+  }
+
+  if (car.images.length + images.length > env.MAX_IMAGES_PER_CAR) {
+    throw new AppError(
+      400,
+      `A car can have at most ${env.MAX_IMAGES_PER_CAR} images.`,
+      "IMAGE_LIMIT_EXCEEDED"
+    );
+  }
+
+  const createdImageIds: string[] = [];
+
+  try {
+    for (const image of images) {
+      if (
+        !image.path ||
+        !image.publicUrl ||
+        !image.originalName ||
+        image.displayOrder == null
+      ) {
+        throw new AppError(
+          400,
+          "Invalid uploaded image information.",
+          "INVALID_IMAGE_METADATA"
+        );
+      }
+
+      /*
+       * Make sure the path belongs to this car.
+       * This prevents an admin request from accidentally
+       * attaching an image from another car.
+       */
+      if (!image.path.startsWith(`cars/${id}/`)) {
+        throw new AppError(
+          400,
+          "Invalid image storage path.",
+          "INVALID_IMAGE_PATH"
+        );
+      }
+
+      const created = await prisma.carImage.create({
+        data: {
+          carId: id,
+          storagePath: image.path,
+          publicUrl: image.publicUrl,
+          originalName: image.originalName.slice(0, 255),
+          mimeType: "image/webp",
+          sizeBytes: Number(image.sizeBytes ?? 0),
+          displayOrder: Number(image.displayOrder),
+        },
+      });
+
+      createdImageIds.push(created.id);
+    }
+
+    const updatedCar = await prisma.car.findUnique({
+      where: { id },
+      include: {
+        images: {
+          orderBy: {
+            displayOrder: "asc",
+          },
+        },
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: updatedCar,
+    });
+  } catch (error) {
+    if (createdImageIds.length > 0) {
+      await prisma.carImage.deleteMany({
+        where: {
+          id: {
+            in: createdImageIds,
+          },
+        },
+      });
+    }
+
+    /*
+     * If DB creation fails after Supabase upload,
+     * remove the uploaded files as well.
+     */
+    await Promise.allSettled(
+      images
+        .map((image) => image.path)
+        .filter(
+          (path): path is string =>
+            typeof path === "string" && path.startsWith(`cars/${id}/`)
+        )
+        .map((path) => deleteImage(path))
+    );
+
+    throw error;
+  }
+}
+
+export async function prepareCarImageUploads(req: Request, res: Response) {
+  const id = idSchema.parse(req.params.id);
+
+  const car = await prisma.car.findUnique({
+    where: { id },
+    include: { images: true },
+  });
+
+  if (!car) {
+    throw new AppError(404, "Car not found.", "CAR_NOT_FOUND");
+  }
+
+  const body = req.body as {
+    files?: {
+      name?: string;
+      size?: number;
+      type?: string;
+    }[];
+  };
+
+  const files = Array.isArray(body.files) ? body.files : [];
+
+  if (files.length === 0) {
+    throw new AppError(400, "At least one image is required.", "NO_IMAGES");
+  }
+
+  if (car.images.length + files.length > env.MAX_IMAGES_PER_CAR) {
+    throw new AppError(
+      400,
+      `A car can have at most ${env.MAX_IMAGES_PER_CAR} images.`,
+      "IMAGE_LIMIT_EXCEEDED"
+    );
+  }
+
+  const maxOrder = car.images.reduce(
+    (max, image) => Math.max(max, image.displayOrder),
+    -1
+  );
+
+  const uploads = await Promise.all(
+    files.map(async (file, index) => {
+      const fileId = crypto.randomUUID();
+
+      const storagePath = `cars/${id}/${fileId}.webp`;
+
+      const signed = await createSignedImageUpload(storagePath);
+
+      return {
+        path: signed.path,
+        token: signed.token,
+        signedUrl: signed.signedUrl,
+        publicUrl: signed.publicUrl,
+
+        originalName: String(file.name ?? "image.webp").slice(0, 255),
+
+        mimeType: "image/webp",
+
+        sizeBytes: Number(file.size ?? 0),
+
+        displayOrder: maxOrder + index + 1,
+      };
+    })
+  );
+
+  res.status(200).json({
+    success: true,
+    data: {
+      uploads,
+    },
+  });
 }

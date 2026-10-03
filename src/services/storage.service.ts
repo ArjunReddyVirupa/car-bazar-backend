@@ -15,30 +15,69 @@ export async function uploadImage(path: string, data: Buffer) {
       upsert: false,
     });
 
-  if (error)
+  if (error) {
     throw new AppError(
       502,
       `Image storage upload failed: ${error.message}`,
       "STORAGE_UPLOAD_FAILED"
     );
+  }
 
   const { data: publicData } = supabaseAdmin.storage
     .from(env.SUPABASE_STORAGE_BUCKET)
     .getPublicUrl(path);
 
-  return { path, publicUrl: publicData.publicUrl };
+  return {
+    path,
+    publicUrl: publicData.publicUrl,
+  };
+}
+
+/**
+ * Creates a signed upload target.
+ *
+ * The browser can use this target to upload directly
+ * to Supabase Storage without sending the image through Vercel.
+ */
+export async function createSignedImageUpload(path: string) {
+  const { data, error } = await supabaseAdmin.storage
+    .from(env.SUPABASE_STORAGE_BUCKET)
+    .createSignedUploadUrl(path);
+
+  if (error || !data) {
+    throw new AppError(
+      502,
+      `Unable to create signed image upload: ${
+        error?.message ?? "Unknown error"
+      }`,
+      "SIGNED_UPLOAD_FAILED"
+    );
+  }
+
+  const { data: publicData } = supabaseAdmin.storage
+    .from(env.SUPABASE_STORAGE_BUCKET)
+    .getPublicUrl(path);
+
+  return {
+    path,
+    token: data.token,
+    signedUrl: data.signedUrl,
+    publicUrl: publicData.publicUrl,
+  };
 }
 
 export async function deleteImage(path: string) {
   const { error } = await supabaseAdmin.storage
     .from(env.SUPABASE_STORAGE_BUCKET)
     .remove([path]);
-  if (error)
+
+  if (error) {
     throw new AppError(
       502,
       `Image storage delete failed: ${error.message}`,
       "STORAGE_DELETE_FAILED"
     );
+  }
 }
 
 export function safePublicStoragePath(path: string) {

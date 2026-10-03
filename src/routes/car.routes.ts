@@ -11,6 +11,8 @@ import {
   updateCar,
   updateStatus,
   uploadCarImages,
+  prepareCarImageUploads,
+  completeCarImageUploads,
 } from "../controllers/car.controller.js";
 
 export const carRouter = Router();
@@ -27,6 +29,17 @@ carRouter.post(
   requireAdmin,
   imageUpload.array("images"),
   asyncHandler(uploadCarImages)
+);
+carRouter.post(
+  "/:id/images/sign",
+  requireAdmin,
+  asyncHandler(prepareCarImageUploads)
+);
+
+carRouter.post(
+  "/:id/images/complete",
+  requireAdmin,
+  asyncHandler(completeCarImageUploads)
 );
 carRouter.delete(
   "/:id/images/:imageId",
