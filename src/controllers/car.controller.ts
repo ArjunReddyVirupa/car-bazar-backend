@@ -421,16 +421,13 @@ export async function uploadCarImages(req: Request, res: Response) {
       const processed = await sharp(file.buffer, {
         limitInputPixels: 25_000_000,
       })
-        // Fix phone-camera orientation
         .rotate()
-        // Resize large images without enlarging small images
         .resize({
           width: 2000,
           height: 1500,
           fit: "inside",
           withoutEnlargement: true,
         })
-        // Convert to WebP
         .webp({
           quality: 80,
           effort: 4,
@@ -446,6 +443,10 @@ export async function uploadCarImages(req: Request, res: Response) {
       const stored = await uploadImage(storagePath, processed);
 
       uploaded.push(stored);
+      const maxOrder = car.images.reduce(
+        (max, image) => Math.max(max, image.displayOrder),
+        -1
+      );
 
       // Save image information in database
       const carImage = await prisma.carImage.create({
@@ -453,18 +454,10 @@ export async function uploadCarImages(req: Request, res: Response) {
           carId: id,
           storagePath: stored.path,
           publicUrl: stored.publicUrl,
-
-          // Keep original filename for admin reference
           originalName: file.originalname.slice(0, 255),
-
-          // Stored format is always WebP
           mimeType: "image/webp",
-
-          // Size of optimized WebP
           sizeBytes: processed.length,
-
-          // Preserve upload order
-          displayOrder: car.images.length + index,
+          displayOrder: maxOrder + uploaded.length + 1,
         },
       });
 

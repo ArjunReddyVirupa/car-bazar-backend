@@ -12,7 +12,7 @@ const allowed = new Set([
 export const imageUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 20 * 1024 * 1024,
+    fileSize: 4 * 1024 * 1024,
     files: env.MAX_IMAGES_PER_CAR,
   },
   fileFilter: (_req, file, cb) => {
@@ -26,6 +26,7 @@ export const imageUpload = multer({
       );
       return;
     }
+
     cb(null, true);
   },
 });
