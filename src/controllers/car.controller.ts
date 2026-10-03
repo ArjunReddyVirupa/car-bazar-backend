@@ -732,7 +732,7 @@ export async function prepareCarImageUploads(req: Request, res: Response) {
 
   const maxOrder = car.images.reduce(
     (max, image) => Math.max(max, image.displayOrder),
-    -1
+    0
   );
 
   const uploads = await Promise.all(
