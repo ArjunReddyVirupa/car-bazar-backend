@@ -384,15 +384,22 @@ export async function deleteCar(req: Request, res: Response) {
 
 export async function uploadCarImages(req: Request, res: Response) {
   const id = idSchema.parse(req.params.id);
+
   const car = await prisma.car.findUnique({
     where: { id },
     include: { images: true },
   });
-  if (!car) throw new AppError(404, "Car not found.", "CAR_NOT_FOUND");
+
+  if (!car) {
+    throw new AppError(404, "Car not found.", "CAR_NOT_FOUND");
+  }
 
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
-  if (files.length === 0)
+
+  if (files.length === 0) {
     throw new AppError(400, "At least one image is required.", "NO_IMAGES");
+  }
+
   if (car.images.length + files.length > env.MAX_IMAGES_PER_CAR) {
     throw new AppError(
       400,
@@ -401,47 +408,102 @@ export async function uploadCarImages(req: Request, res: Response) {
     );
   }
 
-  const uploaded: { path: string; publicUrl: string }[] = [];
+  const uploaded: {
+    path: string;
+    publicUrl: string;
+  }[] = [];
+
+  const createdImageIds: string[] = [];
+
   try {
-    for (const file of files) {
-      const processed = await sharp(file.buffer)
+    for (const [index, file] of files.entries()) {
+      // Convert every uploaded image to WebP
+      const processed = await sharp(file.buffer, {
+        limitInputPixels: 25_000_000,
+      })
+        // Fix phone-camera orientation
         .rotate()
+        // Resize large images without enlarging small images
         .resize({
           width: 2000,
           height: 1500,
           fit: "inside",
           withoutEnlargement: true,
         })
-        .webp({ quality: 78, effort: 4 })
+        // Convert to WebP
+        .webp({
+          quality: 80,
+          effort: 4,
+          smartSubsample: true,
+        })
         .toBuffer();
 
       const fileId = crypto.randomUUID();
-      const path = `cars/${id}/${fileId}.webp`;
-      const stored = await uploadImage(path, processed);
+
+      const storagePath = `cars/${id}/${fileId}.webp`;
+
+      // Upload optimized WebP to Supabase
+      const stored = await uploadImage(storagePath, processed);
+
       uploaded.push(stored);
 
-      await prisma.carImage.create({
+      // Save image information in database
+      const carImage = await prisma.carImage.create({
         data: {
           carId: id,
           storagePath: stored.path,
           publicUrl: stored.publicUrl,
+
+          // Keep original filename for admin reference
           originalName: file.originalname.slice(0, 255),
+
+          // Stored format is always WebP
           mimeType: "image/webp",
+
+          // Size of optimized WebP
           sizeBytes: processed.length,
-          displayOrder: car.images.length + uploaded.length - 1,
+
+          // Preserve upload order
+          displayOrder: car.images.length + index,
+        },
+      });
+
+      createdImageIds.push(carImage.id);
+    }
+  } catch (error) {
+    // Remove database records created during this upload
+    if (createdImageIds.length > 0) {
+      await prisma.carImage.deleteMany({
+        where: {
+          id: {
+            in: createdImageIds,
+          },
         },
       });
     }
-  } catch (error) {
+
+    // Remove files already uploaded to Supabase
     await Promise.allSettled(uploaded.map((file) => deleteImage(file.path)));
+
     throw error;
   }
 
+  // Return updated car with all images
   const updated = await prisma.car.findUnique({
     where: { id },
-    include: { images: { orderBy: { displayOrder: "asc" } } },
+    include: {
+      images: {
+        orderBy: {
+          displayOrder: "asc",
+        },
+      },
+    },
   });
-  res.status(201).json({ success: true, data: serializeCar(updated) });
+
+  res.status(201).json({
+    success: true,
+    data: serializeCar(updated),
+  });
 }
 
 export async function deleteCarImage(req: Request, res: Response) {
