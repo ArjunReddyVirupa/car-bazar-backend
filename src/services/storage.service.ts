@@ -66,6 +66,14 @@ export async function createSignedImageUpload(path: string) {
   };
 }
 
+export function getPublicImageUrl(path: string) {
+  const { data } = supabaseAdmin.storage
+    .from(env.SUPABASE_STORAGE_BUCKET)
+    .getPublicUrl(path);
+
+  return data.publicUrl;
+}
+
 export async function deleteImage(path: string) {
   const { error } = await supabaseAdmin.storage
     .from(env.SUPABASE_STORAGE_BUCKET)

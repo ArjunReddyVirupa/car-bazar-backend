@@ -8,6 +8,7 @@ import { AppError } from "../utils/http.js";
 import {
   createSignedImageUpload,
   deleteImage,
+  getPublicImageUrl,
   uploadImage,
 } from "../services/storage.service.js";
 
@@ -27,6 +28,9 @@ const transmissionValues = [
   "DCT",
 ] as const;
 const statusValues = ["AVAILABLE", "RESERVED", "SOLD", "INACTIVE"] as const;
+const MAX_DIRECT_UPLOAD_IMAGE_BYTES = 3.5 * 1024 * 1024;
+
+const ALLOWED_DIRECT_UPLOAD_TYPES = new Set(["image/webp"]);
 
 const booleanParam = z.preprocess((value) => {
   if (value === "true" || value === true) return true;
@@ -531,9 +535,7 @@ export async function completeCarImageUploads(req: Request, res: Response) {
   const body = req.body as {
     images?: {
       path?: string;
-      publicUrl?: string;
       originalName?: string;
-      mimeType?: string;
       sizeBytes?: number;
       displayOrder?: number;
     }[];
@@ -561,12 +563,7 @@ export async function completeCarImageUploads(req: Request, res: Response) {
 
   try {
     for (const image of images) {
-      if (
-        !image.path ||
-        !image.publicUrl ||
-        !image.originalName ||
-        image.displayOrder == null
-      ) {
+      if (!image.path || !image.originalName || image.displayOrder == null) {
         throw new AppError(
           400,
           "Invalid uploaded image information.",
@@ -586,16 +583,41 @@ export async function completeCarImageUploads(req: Request, res: Response) {
           "INVALID_IMAGE_PATH"
         );
       }
+      const sizeBytes = Number(image.sizeBytes);
+
+      if (
+        !Number.isFinite(sizeBytes) ||
+        sizeBytes <= 0 ||
+        sizeBytes > MAX_DIRECT_UPLOAD_IMAGE_BYTES
+      ) {
+        throw new AppError(400, "Invalid image size.", "INVALID_IMAGE_SIZE");
+      }
+
+      const displayOrder = Number(image.displayOrder);
+
+      if (
+        !Number.isInteger(displayOrder) ||
+        displayOrder < 1 ||
+        displayOrder > env.MAX_IMAGES_PER_CAR
+      ) {
+        throw new AppError(
+          400,
+          "Invalid image display order.",
+          "INVALID_IMAGE_ORDER"
+        );
+      }
+
+      const publicUrl = getPublicImageUrl(image.path);
 
       const created = await prisma.carImage.create({
         data: {
           carId: id,
           storagePath: image.path,
-          publicUrl: image.publicUrl,
+          publicUrl,
           originalName: image.originalName.slice(0, 255),
           mimeType: "image/webp",
-          sizeBytes: Number(image.sizeBytes ?? 0),
-          displayOrder: Number(image.displayOrder),
+          sizeBytes,
+          displayOrder,
         },
       });
 
@@ -615,7 +637,7 @@ export async function completeCarImageUploads(req: Request, res: Response) {
 
     res.status(200).json({
       success: true,
-      data: updatedCar,
+      data: serializeCar(updatedCar),
     });
   } catch (error) {
     if (createdImageIds.length > 0) {
@@ -670,6 +692,34 @@ export async function prepareCarImageUploads(req: Request, res: Response) {
 
   if (files.length === 0) {
     throw new AppError(400, "At least one image is required.", "NO_IMAGES");
+  }
+
+  for (const file of files) {
+    if (!file.name || typeof file.name !== "string") {
+      throw new AppError(400, "Invalid image name.", "INVALID_IMAGE_METADATA");
+    }
+
+    if (!file.type || !ALLOWED_DIRECT_UPLOAD_TYPES.has(file.type)) {
+      throw new AppError(
+        400,
+        "Only WebP images are allowed.",
+        "INVALID_IMAGE_TYPE"
+      );
+    }
+
+    const size = Number(file.size);
+
+    if (!Number.isFinite(size) || size <= 0) {
+      throw new AppError(400, "Invalid image size.", "INVALID_IMAGE_SIZE");
+    }
+
+    if (size > MAX_DIRECT_UPLOAD_IMAGE_BYTES) {
+      throw new AppError(
+        400,
+        "Each image must be 3.5 MB or smaller.",
+        "IMAGE_TOO_LARGE"
+      );
+    }
   }
 
   if (car.images.length + files.length > env.MAX_IMAGES_PER_CAR) {

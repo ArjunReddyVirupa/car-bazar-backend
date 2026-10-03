@@ -25,12 +25,6 @@ carRouter.put("/:id", requireAdmin, asyncHandler(updateCar));
 carRouter.delete("/:id", requireAdmin, asyncHandler(deleteCar));
 carRouter.patch("/:id/status", requireAdmin, asyncHandler(updateStatus));
 carRouter.post(
-  "/:id/images",
-  requireAdmin,
-  imageUpload.array("images"),
-  asyncHandler(uploadCarImages)
-);
-carRouter.post(
   "/:id/images/sign",
   requireAdmin,
   asyncHandler(prepareCarImageUploads)
@@ -40,6 +34,12 @@ carRouter.post(
   "/:id/images/complete",
   requireAdmin,
   asyncHandler(completeCarImageUploads)
+);
+carRouter.post(
+  "/:id/images",
+  requireAdmin,
+  imageUpload.array("images"),
+  asyncHandler(uploadCarImages)
 );
 carRouter.delete(
   "/:id/images/:imageId",
